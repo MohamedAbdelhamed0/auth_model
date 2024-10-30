@@ -21,3 +21,9 @@ class AuthError extends AuthState {
 }
 
 class Unauthenticated extends AuthState {}
+
+class AuthSuccess extends AuthState {
+  final String message;
+
+  AuthSuccess(this.message);
+}

@@ -1,6 +1,8 @@
 // lib/auth/presentation/pages/home_screen.dart
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:intl/intl.dart';
 
 import '../../domain/entities/user.dart';
 import '../manager/auth_cubit.dart';
@@ -12,64 +14,155 @@ class HomeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return BlocListener<AuthCubit, AuthState>(
+    return BlocConsumer<AuthCubit, AuthState>(
       listener: (context, state) {
         if (state is AuthError || state is Unauthenticated) {
-          // Navigate to sign-in screen
           Navigator.pushAndRemoveUntil(
             context,
             MaterialPageRoute(builder: (context) => SignInScreen()),
             (route) => false,
           );
-          // Show error message if any
           if (state is AuthError) {
             ScaffoldMessenger.of(context)
                 .showSnackBar(SnackBar(content: Text(state.message)));
           }
+        } else if (state is AuthSuccess) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(state.message)));
+
+          // Delay for 3 seconds before navigating back to the authenticated view
+          Future.delayed(Duration(seconds: 3), () {
+            context
+                .read<AuthCubit>()
+                .checkAuthStatus(); // Re-check authentication
+          });
         }
       },
-      child: _buildHomeContent(context),
+      builder: (context, state) {
+        if (state is Authenticated) {
+          UserModel user = state.user;
+          return Scaffold(
+            appBar: AppBar(
+              title: const Text('Home'),
+              actions: [
+                user.profilePhotoUrl != null
+                    ? CircleAvatar(
+                        backgroundImage: NetworkImage(user.profilePhotoUrl!),
+                      )
+                    : IconButton(
+                        icon: Icon(Icons.account_circle),
+                        onPressed: () {
+                          _pickAndUploadProfilePhoto(context);
+                        },
+                      ),
+              ],
+            ),
+            body: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    Text('Welcome, ${user.username}!'),
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Primary User:'),
+                        Icon(IconData(user.isPrimary ? 0xe5ca : 0xe5cb,
+                            fontFamily: 'MaterialIcons')),
+                        Switch(
+                          value: user.isPrimary,
+                          onChanged: (value) {
+                            context.read<AuthCubit>().updateIsPrimary(value);
+                          },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    Text(
+                      'Subscription Start Date: ${user.subscriptionStartDate != null ? DateFormat('yyyy-MM-dd').format(user.subscriptionStartDate!) : 'Not Set'}',
+                    ),
+                    Text(
+                      'Subscription End Date: ${user.subscriptionEndDate != null ? DateFormat('yyyy-MM-dd').format(user.subscriptionEndDate!) : 'Not Set'}',
+                    ),
+                    ElevatedButton(
+                      onPressed: () {
+                        _selectSubscriptionDates(context);
+                      },
+                      child: Text('Update Subscription Dates'),
+                    ),
+                    const SizedBox(height: 20),
+                    ElevatedButton(
+                      onPressed: () {
+                        _pickAndUploadProfilePhoto(context);
+                      },
+                      child: Text('Upload Profile Photo'),
+                    ),
+                    const SizedBox(height: 20),
+                    ElevatedButton(
+                      onPressed: () {
+                        context.read<AuthCubit>().signOut();
+                      },
+                      child: const Text('Sign Out'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        } else if (state is AuthLoading || state is AuthInitial) {
+          return Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        } else if (state is AuthSuccess) {
+          // Show success message for 3 seconds
+          return Scaffold(
+            body: Center(child: Text('Operation completed successfully.')),
+          );
+        } else {
+          // Fallback for unexpected states
+          return Scaffold(
+            body: Center(child: Text('An error occurred.')),
+          );
+        }
+      },
     );
   }
 
-  Widget _buildHomeContent(BuildContext context) {
-    final authCubit = context.read<AuthCubit>();
-    UserModel? user;
-
-    // Get the user from the current state
-    final state = authCubit.state;
-    if (state is Authenticated) {
-      user = state.user;
-    }
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('Home')),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            Text('Welcome, ${user?.username ?? 'User'}!'),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () {
-                authCubit.signOut();
-                // No need to navigate manually; BlocListener handles it
-              },
-              child: const Text('Sign Out'),
-            ),
-          ],
-        ),
-      ),
+  void _selectSubscriptionDates(BuildContext context) async {
+    DateTime now = DateTime.now();
+    DateTime? startDate = await showDatePicker(
+      context: context,
+      initialDate: now,
+      firstDate: now.subtract(Duration(days: 365)),
+      lastDate: now.add(Duration(days: 365)),
     );
+
+    if (startDate == null) return;
+
+    DateTime? endDate = await showDatePicker(
+      context: context,
+      initialDate: startDate.add(Duration(days: 30)),
+      firstDate: startDate,
+      lastDate: startDate.add(Duration(days: 365)),
+    );
+
+    if (endDate == null) return;
+
+    context.read<AuthCubit>().updateSubscriptionDates(startDate, endDate);
+  }
+
+  void _pickAndUploadProfilePhoto(BuildContext context) async {
+    FilePickerResult? result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['jpg', 'jpeg', 'png'],
+      withData: true,
+    );
+
+    if (result != null && result.files.isNotEmpty) {
+      PlatformFile file = result.files.first;
+      context.read<AuthCubit>().updateProfilePhoto(file);
+    }
   }
 }
-
-// In the code snippet above, we have the  HomeScreen  widget that displays the user's username and a button to sign out. The  HomeScreen  widget is wrapped in a  BlocListener  widget that listens to the  AuthCubit  state. If the state is  AuthError  or  Unauthenticated , the user is navigated to the sign-in screen.
-// The  HomeScreen  widget is also used in the  SplashPage  widget to navigate to the home screen when the user is authenticated.
-// Run the app and test the sign-out functionality.
-// Conclusion
-// In this tutorial, we learned how to implement user authentication in a Flutter app using Firebase Authentication and the BLoC pattern. We created a simple authentication flow with sign-in, sign-up, and sign-out functionality.
-// We also learned how to use the  BlocListener  widget to listen to state changes in the  AuthCubit  and navigate to different screens based on the state.
-// You can find the complete source code for this tutorial on  GitHub.
-// Happy coding!
-// Peer Review Contributions by:  Saiharsha Balasubramaniam
